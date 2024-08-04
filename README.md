@@ -14,4 +14,4 @@ Also need to install the following modules - can be done using 'pip install <mod
 - matplotlib
 
 # Examples
-Example problems can be visualised in 'fea_main.py'
+Example problems can be visualised in 'examples.py'
