@@ -1,4 +1,4 @@
-Finite element analysis (FEA) code repository.
+Finite element analysis (FEA) code repository
 
 # Features
 - For now, handles only 2D element types
