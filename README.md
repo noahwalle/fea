@@ -1,17 +1,13 @@
-## Finite element analysis (FEA) code repository
+FEA code repo
 
-# Features
-- For now, handles only 2D element types
-- class Node -> defining nodal points between elements
-- class Local_Bar -> axial support forces only
-- class Local_Frame -> axial and shear support forces
-- class Assembly -> create a structure of multiple elements
+A simple 2D FEA visualisation package, using numpy and matplotlib
+for arithmetic and visualisation.
 
-# Prerequisites
-Requires Python 3.x to run
-Also need to install the following modules - can be done using 'pip install <module_name>':
-- numpy
-- matplotlib
-
-# Examples
-Example problems can be visualised in 'examples.py'
+Can input degrees of freedom manually (T_x, T_y, R_z),
+or use the keywords which handle all the cases.
+Keywords to set degrees of freedom at a node:
+- 'fixed'
+- 'free'
+- 'pin' / 'pinned'
+- 'roller-vertical'
+- 'roller-horizontal'
