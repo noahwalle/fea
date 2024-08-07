@@ -2,29 +2,40 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 class Node:
-    def __init__(self, name, x, y, T_x=0, T_y=0, T_z=0, R_x=0, R_y=0, R_z=0, z=0):
+    def __init__(self, name, x, y, T_x=0, T_y=0, R_z=0, constraint: str=None):
         """ Initialise with its coordinates in x, y, z
-        Has 6 potential degrees of freedom:
-        - Translation in x, y, z
-        - Rotation about x, y, z 
+        Has 3 potential degrees of freedom:
+        - Translation in x, y
+        - Rotation about z 
         By default, all DOF are fixed """
+
         self.name = name
         self.x = x
         self.y = y
-        self.z = z
-        self.DOF = [T_x, T_y, T_z, R_x, R_y, R_z]
+        if constraint == 'fixed':
+            self.DOF = [0, 0, 0]
+        elif constraint == 'free':
+            self.DOF = [1, 1, 1]
+        elif constraint == 'pin' or constraint == 'pinned':
+            self.DOF = [0, 0, 1]
+        elif constraint == 'roller-vertical':
+            self.DOF = [0, 1, 1]
+        elif constraint == 'roller-horizontal':
+            self.DOF = [1, 0, 1]
+        else:
+            self.DOF = [T_x, T_y, R_z]
     
     def __repr__(self):
         return f"{self.name}: ({self.x}, {self.y})"
 
 class Local_Bar:
     def __init__(self, name, E, A, L, node_a: Node, node_b: Node, alpha, A_matrix=None):
-        """ Class for Local Bar Element
-        Assume:
-        Young's Modulus taken in GPa
-        Area taken in mm^2
-        Length taken in m
-        alpha taken in degrees"""
+        """ Class for local bar element
+        Material properties
+        Young's Modulus, E: [GPa]
+        Area, A: [m^2]
+        Length, L: [m]
+        Angle, alpha: [degrees] """
         self.name = name
         self.E = E
         self.A = A
@@ -55,18 +66,13 @@ class Local_Bar:
         return self.A_matrix @ self.K_e_hat() @ self.A_matrix.T
 
 class Local_Frame:
-    """ Local frame class
-    @params:
-    name: element name
-    E: Young's Modulus
-    I: second moment of area
-    A: cross-sectional area
-    L: length
-    node_a: first node
-    node_b: second node
-    alpha: element angle wrt xG
-    A_matrix: element assembly matrix
-    """
+    """ Class for local frame element
+    Material properties
+    Young's Modulus, E: [GPa]
+    Second moment of area, I: [m^4]
+    Cross-sectional area, A: [m^2]
+    Length, L: [m]
+    Angle, alpha: [degrees] """
     def __init__(self, name, E, I, A, L, node_a: Node, node_b: Node, alpha, A_matrix=None):
         self.name = name
         self.E = E
@@ -105,6 +111,26 @@ class Local_Frame:
     def K_G_e(self):
         """ Element contribution to global stiffness matrix """
         return self.A_matrix @ self.K_e_hat() @ self.A_matrix.T
+    
+        # Axial shape functions
+    def phi_1(self, x):
+        return 1 - x / self.L
+    
+    def phi_2(self, x):
+        return x / self.L
+
+    # Transverse shape functions
+    def N1(self, x):
+        return 1 - 3 * x ** 2 / self.L ** 2 + 2 * x ** 3 / self.L ** 3
+    
+    def N2(self, x):
+        return x ** 3 / self.L ** 2 - 2 * x ** 2 / self.L + x
+
+    def N3(self, x):
+        return 3 * x ** 2 / self.L ** 2 - 2 * x ** 3 / self.L ** 3
+
+    def N4(self, x):
+        return x ** 3 / self.L ** 2 - x ** 2 / self.L
 
 class Assembly:
     """ Assembly Class
@@ -132,17 +158,23 @@ class Assembly:
             self.nodes.append(element.nodes[1])
         self.nodes.sort(key = lambda s: s.name)
         self.elements.sort(key = lambda s: s.name)
-    
-    def dof_count(self):
-        dof_count = list()
 
-        # Work out the total number of possible non-zero deflections in the structure
+    def reassign_dof_vals(self):
+        q_counter = 0
         for node in self.nodes:
             for i in range(len(node.DOF)):
-                if (node.DOF[i] and i < 3):
-                    dof_count.append("translation")
-                if (node.DOF[i] and i >= 3):
-                    dof_count.append("rotation")
+                if node.DOF[i] > 0:
+                    node.DOF[i] += q_counter
+                    q_counter += 1
+
+    def dof_count(self):
+        dof_count = []
+        for node in self.nodes:
+            for i in range(len(node.DOF)):
+                if (node.DOF[i] and i < 2):
+                    dof_count.append("t")
+                elif (node.DOF[i] and i == 2):
+                    dof_count.append("r")
         return dof_count
 
     def K_G(self):
@@ -157,34 +189,30 @@ class Assembly:
         return np.linalg.solve(self.K_G(), self.Q)
     
     def A_matrices(self):
+        self.reassign_dof_vals()
         """ Generates the assembly matrices for all elements of a structure using DOFs """
-        q_count = 0
-        d_count = 0 # makes sure you go through all the entries for each bar
+        d_counter = 0 # makes sure you go through all the possible entries for each element
 
         for element in self.elements:
             if isinstance(element, Local_Bar):
                 A_matrix = np.zeros((len(self.dof_count()), 4))
                 # Work out the element's contributions to each deflection
                 for node in element.nodes:
-                    for i in [0, 1]:
-                        A_matrix[q_count][d_count] = node.DOF[i]
-                        d_count += 1
-                        d_count %= 4
-                        if (node.DOF[i]):
-                            q_count += 1
-                            q_count %= len(self.dof_count())
+                    for dof in node.DOF[0:2]:
+                        if dof:
+                            A_matrix[dof-1][d_counter] = 1
+                        d_counter += 1
+                        d_counter %= 4
                 element.A_matrix = A_matrix
             elif isinstance(element, Local_Frame):
                 A_matrix = np.zeros((len(self.dof_count()), 6))
                 # Work out the element's contributions to each deflection
                 for node in element.nodes:
-                    for i in [0, 1, 5]:
-                        A_matrix[q_count][d_count] = node.DOF[i]
-                        d_count += 1
-                        d_count %= 6
-                        if (node.DOF[i]):
-                            q_count += 1
-                            q_count %= len(self.dof_count())
+                    for dof in node.DOF:
+                        if dof:
+                            A_matrix[dof-1][d_counter] = 1
+                        d_counter += 1
+                        d_counter %= 6
                 element.A_matrix = A_matrix
                 
     def F_e(self, element: Local_Bar):
@@ -245,3 +273,76 @@ class Assembly:
         self.ax.grid()
         self.ax.set_aspect("equal")
         plt.show()
+    
+    def draw_full_deflected_frame(self, deflection_scale, n_points):
+        for element in self.elements:
+            x_e = np.linspace(0, element.L, n_points)
+            u = element.phi_1(x_e) * self.d_e(element)[0] + element.phi_2(x_e) * self.d_e(element)[3]
+            v = element.N1(x_e) * self.d_e(element)[1] + element.N2(x_e) * self.d_e(element)[2] + element.N3(x_e) * self.d_e(element)[4] + element.N4(x_e) * self.d_e(element)[5]
+            deflections_XG = u * np.cos(element.alpha) - v * np.sin(element.alpha)
+            deflections_YG = u * np.sin(element.alpha) + v * np.cos(element.alpha)
+            undeflected_baseline_XG = np.linspace(element.nodes[0].x, element.nodes[1].x, n_points)
+            undeflected_baseline_YG = np.linspace(element.nodes[0].y, element.nodes[1].y, n_points)
+            deflected_XG = undeflected_baseline_XG + deflection_scale * deflections_XG
+            deflected_YG = undeflected_baseline_YG + deflection_scale * deflections_YG
+
+            self.ax.plot(undeflected_baseline_XG, undeflected_baseline_YG, 'b.-')
+            self.ax.plot(deflected_XG, deflected_YG, 'r.-')
+
+def uniformly_distributed_load(w, L):
+    """ Equivalent nodal loading definition for a UDL
+        Applied along the length of a frame element
+        Parameters:
+        w: Load intensity [N]
+        L: element length [m] 
+    """
+    return np.array([0, w*L/2, w*L**2/12, 0, w*L/2, -w*L**2/12])
+
+def linearly_varying_load(w, L):
+    """ Equivalent nodal loading definition for a LVL
+        Applied along the length of a frame element
+        Parameters:
+        w: Load intensity [N]
+        L: element length [m] 
+    """
+    return np.array([0, 3*w*L/20, w*L**2/30, 0, 7*w*L/20, -w*L**2/20])
+
+def transverse_point_load(w, L, a):
+    """ Equivalent nodal loading definition for a TPL
+        Applied along the length of a frame element
+        Parameters:
+        w: Load intensity [N]
+        L: element length [m]
+        a: Load applied this distance from node 1 [m]
+    """
+    return w * np.array([0, 1-3*a**2/L**2+2*a**3/L**3, a**3/L**2-2*a**2/L+a, 0, 3*a**2/L**2-2*a**3/L**3, a**3/L**2-a**2/L])
+
+def mid_span_point_load(w, L, a):
+    """ Equivalent nodal loading definition for a TPL, where a = L/2
+        Applied along the length of a frame element
+        Parameters:
+        w: Load intensity [N]
+        L: element length [m]
+        a: Load applied halfway along element [m]
+    """
+    return w * np.array([0, w/2, w*L/8, 0, w/2, -w*L/8])
+    # return transverse_point_load(w, L, a/2)
+
+def distributed_axial_load(L, p):
+    """ Equivalent nodal loading definition for a DAL
+        Applied along the length of a frame element
+        Parameters:
+        p: Load intensity [N]
+        L: element length [m]
+    """
+    return p * np.array([L/2, 0, 0, L/2, 0, 0])
+
+def concentrated_axial_load(L, p, a):
+    """ Equivalent nodal loading definition for a TPL
+        Applied along the length of a frame element
+        Parameters:
+        p: Load intensity [N]
+        L: element length [m]
+        a: Load applied this distance from node 1 [m]
+    """
+    return p * np.array([1-a/L, 0, 0, a/L, 0, 0])
