@@ -8,7 +8,6 @@ class Node:
         - Translation in x, y
         - Rotation about z 
         By default, all DOF are fixed """
-
         self.name = name
         self.x = x
         self.y = y
@@ -19,11 +18,17 @@ class Node:
         elif constraint == 'pin' or constraint == 'pinned':
             self.DOF = [0, 0, 1]
         elif constraint == 'roller-vertical':
-            self.DOF = [0, 1, 1]
+            self.DOF = [0, 1, 0]
         elif constraint == 'roller-horizontal':
+            self.DOF = [1, 0, 0]
+        elif constraint == 'roller-vertical-pin':
+            self.DOF = [0, 1, 1]
+        elif constraint == 'roller-horizontal-pin':
             self.DOF = [1, 0, 1]
         else:
             self.DOF = [T_x, T_y, R_z]
+        self.constraint = constraint
+        self.ReactionLoads = None
     
     def __repr__(self):
         return f"{self.name}: ({self.x}, {self.y})"
@@ -82,6 +87,8 @@ class Local_Frame:
         self.nodes = [node_a, node_b]
         self.alpha = np.radians(alpha)
         self.A_matrix = A_matrix
+        self.force_equivalent = None
+        self.global_forces = None
 
     def __repr__(self):
         return f"{self.name}, E = {self.E/1e9} GPa, A = {round(self.A/1e-6, 2)} mm^2, I = {self.I} m^4, L = {self.L} m, Node A: {self.nodes[0]}, Node B: {self.nodes[1]}, alpha = {self.alpha} degrees"
@@ -112,7 +119,7 @@ class Local_Frame:
         """ Element contribution to global stiffness matrix """
         return self.A_matrix @ self.K_e_hat() @ self.A_matrix.T
     
-        # Axial shape functions
+    # Axial shape functions
     def phi_1(self, x):
         return 1 - x / self.L
     
@@ -130,7 +137,7 @@ class Local_Frame:
         return 3 * x ** 2 / self.L ** 2 - 2 * x ** 3 / self.L ** 3
 
     def N4(self, x):
-        return x ** 3 / self.L ** 2 - x ** 2 / self.L
+        return x ** 3 / self.L ** 2 - x ** 2 / self.L        
 
 class Assembly:
     """ Assembly Class
@@ -194,6 +201,7 @@ class Assembly:
         d_counter = 0 # makes sure you go through all the possible entries for each element
 
         for element in self.elements:
+            element.force_equivalent = np.zeros((6,1), dtype=float)
             if isinstance(element, Local_Bar):
                 A_matrix = np.zeros((len(self.dof_count()), 4))
                 # Work out the element's contributions to each deflection
@@ -215,15 +223,15 @@ class Assembly:
                         d_counter %= 6
                 element.A_matrix = A_matrix
                 
-    def F_e(self, element: Local_Bar):
+    def F_e(self, element: Local_Bar | Local_Frame):
         """ Element nodal forces in global coordinates """
         return element.K_e_hat() @ element.A_matrix.T @ self.q()
     
-    def d_e(self, element: Local_Bar):
+    def d_e(self, element: Local_Bar | Local_Frame):
         """ Local defromations in local coordinates """
         return element.Lambda() @ element.A_matrix.T @ self.q()
     
-    def f_e(self, element: Local_Bar):
+    def f_e(self, element: Local_Bar | Local_Frame):
         """ Element nodal forces in local element coordinates """
         return element.K_e() @ self.d_e(element)
 
@@ -288,6 +296,55 @@ class Assembly:
 
             self.ax.plot(undeflected_baseline_XG, undeflected_baseline_YG, 'b.-')
             self.ax.plot(deflected_XG, deflected_YG, 'r.-')
+    
+    def set_reaction_loads(self):
+        for element in self.elements:
+            if element.nodes[0].constraint != "free":
+                if element.nodes[0].ReactionLoads is None:
+                    element.nodes[0].ReactionLoads = np.zeros((3,1))
+                element.nodes[0].ReactionLoads += self.F_e(element)[:3].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[:3]
+            if element.nodes[1].constraint != "free":
+                if element.nodes[1].ReactionLoads is None:
+                    element.nodes[1].ReactionLoads = np.zeros((3,1))
+                element.nodes[1].ReactionLoads += self.F_e(element)[3:].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[3:]
+            
+    def print_assembly_matrices(self):
+        for element in self.elements:
+            print(f"{element.name} A:\n{element.A_matrix}\n")
+            
+    def print_K_G_e(self):
+        for element in self.elements:
+            print(f"{element.name} KGe:\n{element.K_G_e()/1e6}\n")
+    
+    def print_global_element_forces(self):
+        for element in self.elements:
+            print(f"{element.name} F_e:\n{self.F_e(element)}\n")
+    
+    def print_reaction_loads(self):
+        for node in self.nodes:
+            print(f"{node.name}:\n{node.ReactionLoads}")
+            
+    def get_deflection_axial(self, element: Local_Frame, x_e):
+        return element.phi_1(x_e) * self.d_e(element)[0] + element.phi_2(x_e) * self.d_e(element)[3]
+        
+    def get_deflection_transverse(self, element: Local_Frame, x_e):
+        return element.N1(x_e) * self.d_e(element)[1] + element.N2(x_e) * self.d_e(element)[2] + element.N3(x_e) * self.d_e(element)[4] + element.N4(x_e) * self.d_e(element)[5]
+    
+    def get_max_deflection_axial(self, element: Local_Frame, x_e):
+        return np.max(np.abs(element.phi_1(x_e) * self.d_e(element)[0] + element.phi_2(x_e) * self.d_e(element)[3]))
+        
+    def get_max_deflection_transverse(self, element: Local_Frame, x_e):
+        v_max = np.max(np.abs(element.N1(x_e) * self.d_e(element)[1] + element.N2(x_e) * self.d_e(element)[2] + element.N3(x_e) * self.d_e(element)[4] + element.N4(x_e) * self.d_e(element)[5]))
+        v_max_index = np.where(v_max)
+        return v_max, v_max_index
+    
+    def strain_in_element(self, element: Local_Frame):
+        epsilon = (self.d_e(element)[3] - self.d_e(element)[0]) / element.L
+        return epsilon
+
+    def stress_in_element(self, element: Local_Frame):
+        sigma = element.E * self.strain_in_element(element)
+        return sigma
 
 def uniformly_distributed_load(w, L):
     """ Equivalent nodal loading definition for a UDL
@@ -328,7 +385,7 @@ def mid_span_point_load(w, L, a):
     return w * np.array([0, w/2, w*L/8, 0, w/2, -w*L/8])
     # return transverse_point_load(w, L, a/2)
 
-def distributed_axial_load(L, p):
+def distributed_axial_load(p, L):
     """ Equivalent nodal loading definition for a DAL
         Applied along the length of a frame element
         Parameters:
@@ -337,9 +394,9 @@ def distributed_axial_load(L, p):
     """
     return p * np.array([L/2, 0, 0, L/2, 0, 0])
 
-def concentrated_axial_load(L, p, a):
-    """ Equivalent nodal loading definition for a TPL
-        Applied along the length of a frame element
+def concentrated_axial_load(p, L, a):
+    """ Equivalent nodal loading definition for a CPL
+        Applied at a point along a frame element
         Parameters:
         p: Load intensity [N]
         L: element length [m]
