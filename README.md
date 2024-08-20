@@ -1,8 +1,9 @@
 # FEA code repo
 ___
-1. [Introduction](#introduction)
-1. [Features](#features)
-1. [Examples](#examples)
+- [FEA code repo](#fea-code-repo)
+  - [Introduction](#introduction)
+  - [Features](#features)
+  - [Examples](#examples)
 
 ## Introduction
 A simple 2D FEA visualisation package, using numpy and matplotlib
@@ -21,3 +22,5 @@ Keywords to set degrees of freedom at a node:
 - roller-horizontal-pin
 
 ## Examples
+
+Examples are in fea_main.py
