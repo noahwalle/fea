@@ -15,7 +15,7 @@ class Node:
             self.DOF = [0, 0, 0]
         elif constraint == 'free':
             self.DOF = [1, 1, 1]
-        elif constraint == 'pin' or constraint == 'pinned':
+        elif constraint == 'pin':
             self.DOF = [0, 0, 1]
         elif constraint == 'roller-vertical':
             self.DOF = [0, 1, 0]
