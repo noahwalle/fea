@@ -168,20 +168,33 @@ class Assembly:
 
     def reassign_dof_vals(self):
         q_counter = 0
-        for node in self.nodes:
-            for i in range(len(node.DOF)):
-                if node.DOF[i] > 0:
-                    node.DOF[i] += q_counter
-                    q_counter += 1
+        if isinstance(self.elements[0], Local_Bar):
+            for node in self.nodes:
+                for i in range(len(node.DOF)): # needs to not consider the rotation component for bars
+                    if node.DOF[i] > 0:
+                        node.DOF[i] += q_counter
+                        q_counter += 1
+        elif isinstance(self.elements[0], Local_Frame):
+            for node in self.nodes:
+                for i in range(len(node.DOF)):
+                    if node.DOF[i] > 0:
+                        node.DOF[i] += q_counter
+                        q_counter += 1
 
     def dof_count(self):
         dof_count = []
-        for node in self.nodes:
-            for i in range(len(node.DOF)):
-                if (node.DOF[i] and i < 2):
-                    dof_count.append("t")
-                elif (node.DOF[i] and i == 2):
-                    dof_count.append("r")
+        if isinstance(self.elements[0], Local_Bar):
+            for node in self.nodes:
+                for i in range(len(node.DOF)-1):
+                    if (node.DOF[i]):
+                        dof_count.append("t")
+        elif isinstance(self.elements[0], Local_Frame):
+            for node in self.nodes:
+                for i in range(len(node.DOF)):
+                    if (node.DOF[i] and i < 2):
+                        dof_count.append("t")
+                    elif (node.DOF[i] and i == 2):
+                        dof_count.append("r")
         return dof_count
 
     def K_G(self):
