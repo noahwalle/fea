@@ -55,7 +55,7 @@ There are 9 simple examples (named ex#.py) that detail simple problems
 from various homeworks and labs throughout the year. These are great for
 learning how to set up problems.
 
-# Test Questions
+### Test Questions
 There are 7 questions from tests ranging from 2021-2024. The code produces
 quite a few random-looking outputs. The fea.py module offers some insight
 for details on what is going on under the hood. Refer to the code for each
