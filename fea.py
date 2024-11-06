@@ -170,7 +170,7 @@ class Assembly:
         q_counter = 0
         if isinstance(self.elements[0], Local_Bar):
             for node in self.nodes:
-                for i in range(len(node.DOF)): # needs to not consider the rotation component for bars
+                for i in range(len(node.DOF)-1): # needs to not consider the rotation component for bars
                     if node.DOF[i] > 0:
                         node.DOF[i] += q_counter
                         q_counter += 1
@@ -312,18 +312,39 @@ class Assembly:
     
     def set_reaction_loads(self):
         for element in self.elements:
-            if element.nodes[0].constraint != "free":
-                if element.nodes[0].ReactionLoads is None:
-                    element.nodes[0].ReactionLoads = np.zeros((3,1))
-                element.nodes[0].ReactionLoads += self.F_e(element)[:3].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[:3]
-            if element.nodes[1].constraint != "free":
-                if element.nodes[1].ReactionLoads is None:
-                    element.nodes[1].ReactionLoads = np.zeros((3,1))
-                element.nodes[1].ReactionLoads += self.F_e(element)[3:].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[3:]
-            
+            if isinstance(element, Local_Bar):
+                if element.nodes[0].constraint != "free":
+                    if element.nodes[0].ReactionLoads is None:
+                        element.nodes[0].ReactionLoads = np.zeros((2,1))
+                    element.nodes[0].ReactionLoads += self.F_e(element)[:2].reshape(2,1) - (element.Lambda().T @ element.force_equivalent[:2])[:2]
+                if element.nodes[1].constraint != "free":
+                    if element.nodes[1].ReactionLoads is None:
+                        element.nodes[1].ReactionLoads = np.zeros((2,1))
+                    element.nodes[1].ReactionLoads += self.F_e(element)[2:].reshape(2,1) - (element.Lambda().T @ element.force_equivalent[3:5])[2:]
+            if isinstance(element, Local_Frame):
+                if element.nodes[0].constraint != "free":
+                    if element.nodes[0].ReactionLoads is None:
+                        element.nodes[0].ReactionLoads = np.zeros((3,1))
+                    element.nodes[0].ReactionLoads += self.F_e(element)[:3].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[:3]
+                if element.nodes[1].constraint != "free":
+                    if element.nodes[1].ReactionLoads is None:
+                        element.nodes[1].ReactionLoads = np.zeros((3,1))
+                    element.nodes[1].ReactionLoads += self.F_e(element)[3:].reshape(3,1) - (element.Lambda().T @ element.force_equivalent)[3:]
+
     def print_assembly_matrices(self):
         for element in self.elements:
             print(f"{element.name} A:\n{element.A_matrix}\n")
+
+    def print_deflection(self):
+        print(f'q vector:\n{self.q().reshape(len(self.q()), 1)*1000}')
+
+    def print_angles(self):
+        for element in self.elements:
+            print(f'{element.name}: {np.degrees(element.alpha)}')
+
+    def print_lengths(self):
+        for element in self.elements:
+            print(f'{element.name}: {element.L}')
             
     def print_K_G_e(self):
         for element in self.elements:
@@ -351,13 +372,38 @@ class Assembly:
         v_max_index = np.where(v_max)
         return v_max, v_max_index
     
-    def strain_in_element(self, element: Local_Frame):
-        epsilon = (self.d_e(element)[3] - self.d_e(element)[0]) / element.L
+    def strain_in_element(self, element: Local_Bar | Local_Frame):
+        if isinstance(element, Local_Bar):
+            epsilon = (self.d_e(element)[1] - self.d_e(element)[0]) / element.L
+        if isinstance(element, Local_Frame):
+            epsilon = (self.d_e(element)[3] - self.d_e(element)[0]) / element.L
         return epsilon
 
-    def stress_in_element(self, element: Local_Frame):
+    def axial_stress_in_element(self, element: Local_Frame):
         sigma = element.E * self.strain_in_element(element)
         return sigma
+    
+    def bending_stress_in_element(self, element: Local_Frame, c):
+        M = self.f_e(element)[5] - self.f_e(element)[2]
+        sigma = - M * c / element.I
+        return sigma
+    
+    def total_stress_in_element(self, element: Local_Frame, c):
+        sigma_t = abs(self.axial_stress_in_element(element)) + abs(self.bending_stress_in_element(element, c))
+        return sigma_t
+
+    def print_axial_stresses(self):
+        for element in self.elements:
+            print(f'axial stress in {element.name}: {self.axial_stress_in_element(element)}')
+
+    def print_bending_stresses(self, c):
+        for element in self.elements:
+            print(f'bending stress in {element.name}: {self.bending_stress_in_element(element, c)}')
+
+    def print_total_stresses(self, c):
+        for element in self.elements:
+            print(f'total stress in {element.name}: {self.total_stress_in_element(element, c)}')
+
 
 def uniformly_distributed_load(w, L):
     """ Equivalent nodal loading definition for a UDL
